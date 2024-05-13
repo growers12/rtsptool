@@ -13,9 +13,6 @@ import tempfile
 import shutil
 import signal
 
-# Configure logging to output to console only
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
 capture_running = True  # Global flag to control the capturing loop
 
 def signal_handler(sig, frame):
@@ -99,13 +96,13 @@ def compute_duration_for_nighttime(coordinates):
     
     return round((sunrise_tomorrow - now).total_seconds())
 
-def capture_images(source, interval, quality, capture_id, duration, output_directory, nighttime, coordinates, video, four_cc):
+def capture_images(source, interval, quality, duration, output_directory, nighttime, coordinates, video, four_cc):
     global capture_running
     capture_running = True
 
     temp_dir = tempfile.mkdtemp() if video else None
     start_datetime = datetime.datetime.now()
-    capture_folder = temp_dir if video else os.path.join(output_directory, capture_id, start_datetime.strftime('%Y%m%d%H%M%S'))
+    capture_folder = temp_dir if video else os.path.join(output_directory, start_datetime.strftime('%Y%m%d%H%M%S'))
 
     if not os.path.exists(capture_folder):
         os.makedirs(capture_folder, exist_ok=True)
@@ -131,7 +128,7 @@ def capture_images(source, interval, quality, capture_id, duration, output_direc
             file_name = f'{datetime.datetime.now().strftime("%d%m%y-%H%M%S-%f")}.jpg'
             path = os.path.join(capture_folder, file_name)
             cv2.imwrite(path, frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
-            logging.info(f"Captured image saved to {path}, {int(duration - (current_time - start_time))} seconds to go")
+            logging.debug(f"Captured image saved to {path}, {int(duration - (current_time - start_time))} seconds to go")
             last_capture_time = current_time
 
         video_src.release()
@@ -145,29 +142,25 @@ def capture_images(source, interval, quality, capture_id, duration, output_direc
 
 
 def log_parameters(args):
-    logging.info("Capturing parameters:")
-    logging.info(f"  Source URL: {args.source}")
-    logging.info(f"  Interval: {args.interval} seconds")
-    logging.info(f"  Quality: {args.quality}")
+    logging.debug("Capturing parameters:")
+    logging.debug(f"  Source URL: {args.source}")
+    logging.debug(f"  Interval: {args.interval} seconds")
+    logging.debug(f"  Quality: {args.quality}")
     if args.nighttime:
-        logging.info(f"  Duration: will be calculated")
+        logging.debug(f"  Duration: will be calculated")
     else:
-        logging.info(f"  Duration: {args.duration} seconds")
+        logging.debug(f"  Duration: {args.duration} seconds")
     
-    logging.info(f"  Output Directory: {args.output_directory}")
-    logging.info(f"  Nighttime Capture: {'Enabled' if args.nighttime else 'Disabled'}")
+    logging.debug(f"  Output Directory: {args.output_directory}")
+    logging.debug(f"  Nighttime Capture: {'Enabled' if args.nighttime else 'Disabled'}")
     if args.coordinates:
-        logging.info(f"  Coordinates: {args.coordinates}")
+        logging.debug(f"  Coordinates: {args.coordinates}")
     else:
-        logging.info("  Coordinates: Not specified")
-    logging.info(f"  Video Creation: {'Enabled' if args.video else 'Disabled'}")
-    logging.info(f"  Video Codec: {args.fourcc}")
-
-# Previous function definitions remain unchanged...
+        logging.debug("  Coordinates: Not specified")
+    logging.debug(f"  Video Creation: {'Enabled' if args.video else 'Disabled'}")
+    logging.debug(f"  Video Codec: {args.fourcc}")
 
 def main():
-    signal.signal(signal.SIGINT, signal_handler)  # Register the signal handler
-
     parser = argparse.ArgumentParser(description="Capture images from a video source.")
     parser.add_argument("source", help="Video source URL")
     parser.add_argument("--interval", type=int, default=15, help="Interval between captures in seconds")
@@ -177,31 +170,32 @@ def main():
     parser.add_argument("--nighttime", action='store_true', help="Enable capturing only from sunset to sunrise")
     parser.add_argument("--coordinates", type=str, default="41.222,-6.988", help="GPS coordinates for calculating sunrise and sunset times in format 'latitude,longitude'")
     parser.add_argument("--video", action='store_true', help="Create a video from captured images and store only the video")
-    parser.add_argument("--fourcc", type=str, default="mp4v", help="Video codec, choose between mp4v and MJPG (you can try others, depending on the libs installed on your system) ")
-
+    parser.add_argument("--fourcc", type=str, default="mp4v", help="Video codec, choose between mp4v and MJPG")
+    parser.add_argument("--verbose", action='store_true', help="Verbose logging")
 
     args = parser.parse_args()
+    if args.verbose:
+        logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+    else:
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-    log_parameters(args)  # Log all parameters after they have been parsed
+    log_parameters(args)
 
     coordinates = None
     if args.coordinates:
         coordinates = tuple(map(float, args.coordinates.split(',')))
 
-    capture_thread = threading.Thread(target=capture_images, 
-                                      args=(args.source, 
-                                            args.interval, 
-                                            args.quality, 
-                                            urlparse(args.source).hostname, 
-                                            args.duration, 
-                                            args.output_directory, 
-                                            args.nighttime, 
-                                            coordinates, 
-                                            args.video,
-                                            args.fourcc))
-    capture_thread.daemon = True
-    capture_thread.start()
-    capture_thread.join()
+    capture_images(
+        source=args.source,
+        interval=args.interval,
+        quality=args.quality,
+        duration=args.duration,
+        output_directory=args.output_directory,
+        nighttime=args.nighttime,
+        coordinates=coordinates,
+        video=args.video,
+        four_cc=args.fourcc
+    )
 
 if __name__ == "__main__":
     main()
