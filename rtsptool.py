@@ -12,6 +12,7 @@ import logging
 import tempfile
 import shutil
 import signal
+import sys
 
 capture_running = True  # Global flag to control the capturing loop
 
@@ -20,7 +21,7 @@ def signal_handler(sig, frame):
     logging.info("Ctrl-C caught, stopping capture...")
     capture_running = False
 
-def create_video_from_images(image_folder, video_path, four_cc, fps=20.0):
+def create_video_from_images(image_folder, video_path, four_cc, fps=25.0):
     logging.info(f"Creating video file")
 
     images = [img for img in os.listdir(image_folder) if img.endswith(".jpg")]
@@ -96,7 +97,26 @@ def compute_duration_for_nighttime(coordinates):
     
     return round((sunrise_tomorrow - now).total_seconds())
 
-def capture_images(source, interval, quality, duration, output_directory, nighttime, coordinates, video, four_cc):
+def capture_images(source, interval, quality, duration, output_directory, nighttime, coordinates, video, four_cc, width, height):
+    """
+    Capture images from a video source at specified intervals and optionally create a video from the captured images.
+
+    Parameters:
+    - source (int or str): The video source, typically a camera index or a video file path.
+    - interval (float): Time interval (in seconds) between each image capture.
+    - quality (int): JPEG quality of the saved images (0 to 100).
+    - duration (float): Total duration (in seconds) for capturing images.
+    - output_directory (str): Directory to save the captured images and video.
+    - nighttime (bool): Flag indicating whether nighttime adjustments are needed.
+    - coordinates (tuple): Geographic coordinates (latitude, longitude) for nighttime calculation.
+    - video (bool): Flag indicating whether to create a video from the captured images.
+    - four_cc (str): Four-character code for the video codec.
+    - width (int): Width to resize the captured images and video frames. Use 0 to keep original width.
+    - height (int): Height to resize the captured images and video frames. Use 0 to keep original height.
+    
+    Returns:
+    - None
+    """
     global capture_running
     capture_running = True
 
@@ -125,6 +145,8 @@ def capture_images(source, interval, quality, duration, output_directory, nightt
         if not retrieve:
             logging.warning("Failed to retrieve frame.")
         else:
+            if (width*height>0):
+                frame = cv2.resize(frame, (width, height))
             file_name = f'{datetime.datetime.now().strftime("%d%m%y-%H%M%S-%f")}.jpg'
             path = os.path.join(capture_folder, file_name)
             cv2.imwrite(path, frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
@@ -145,20 +167,29 @@ def log_parameters(args):
     logging.debug("Capturing parameters:")
     logging.debug(f"  Source URL: {args.source}")
     logging.debug(f"  Interval: {args.interval} seconds")
-    logging.debug(f"  Quality: {args.quality}")
+    logging.debug(f"  JPEG Quality: {args.quality}")
+    if (args.width*args.height>0):
+        logging.debug(f"  Resize: Enabled")
+        logging.debug(f"  Width: {args.width}")
+        logging.debug(f"  Height: {args.height}")
+    else: 
+        logging.debug(f"  Resize: Disabled")
+
     if args.nighttime:
+        logging.debug(f"  Nighttime Capture: {args.nights} nights")
         logging.debug(f"  Duration: will be calculated")
+        logging.debug(f"  Coordinates: {args.coordinates}")
     else:
         logging.debug(f"  Duration: {args.duration} seconds")
     
     logging.debug(f"  Output Directory: {args.output_directory}")
-    logging.debug(f"  Nighttime Capture: {'Enabled' if args.nighttime else 'Disabled'}")
-    if args.coordinates:
-        logging.debug(f"  Coordinates: {args.coordinates}")
+    
+    if args.video:
+        logging.debug(f"  Video Creation: Enabled")
+        logging.debug(f"  Video Codec: {args.fourcc}")
     else:
-        logging.debug("  Coordinates: Not specified")
-    logging.debug(f"  Video Creation: {'Enabled' if args.video else 'Disabled'}")
-    logging.debug(f"  Video Codec: {args.fourcc}")
+        logging.debug(f"  Video Creation: Disabled")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Capture images from a video source.")
@@ -168,10 +199,13 @@ def main():
     parser.add_argument("--duration", type=int, default=60, help="Duration to run the capture in seconds")
     parser.add_argument("--output_directory", type=str, default=os.path.realpath(os.path.dirname(__file__)), help="Directory to save captured images or final video")
     parser.add_argument("--nighttime", action='store_true', help="Enable capturing only from sunset to sunrise")
+    parser.add_argument("--nights", default=1, type=int, help="Capture a given number of nights")
     parser.add_argument("--coordinates", type=str, default="41.222,-6.988", help="GPS coordinates for calculating sunrise and sunset times in format 'latitude,longitude'")
     parser.add_argument("--video", action='store_true', help="Create a video from captured images and store only the video")
     parser.add_argument("--fourcc", type=str, default="mp4v", help="Video codec, choose between mp4v and MJPG")
     parser.add_argument("--verbose", action='store_true', help="Verbose logging")
+    parser.add_argument("--width", default=0, type=int, help="Image width (if not set, images won't be resized)")
+    parser.add_argument("--height", default=0, type=int, help="Image height (if not set, images won't be resized)")
 
     args = parser.parse_args()
     if args.verbose:
@@ -179,23 +213,36 @@ def main():
     else:
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+    if args.nighttime:
+        loops=args.nights
+    else:
+        loops=1
+
     log_parameters(args)
 
     coordinates = None
     if args.coordinates:
         coordinates = tuple(map(float, args.coordinates.split(',')))
 
-    capture_images(
-        source=args.source,
-        interval=args.interval,
-        quality=args.quality,
-        duration=args.duration,
-        output_directory=args.output_directory,
-        nighttime=args.nighttime,
-        coordinates=coordinates,
-        video=args.video,
-        four_cc=args.fourcc
-    )
+    if args.nighttime is not None and coordinates is None:
+        logging.error("Coordinates must be defined for nighttime mode")
+        sys.exit(1)
+
+    for i in range(0,loops):
+        capture_images(
+            source=args.source,
+            interval=args.interval,
+            quality=args.quality,
+            duration=args.duration,
+            output_directory=args.output_directory,
+            nighttime=args.nighttime,
+            coordinates=coordinates,
+            video=args.video,
+            four_cc=args.fourcc,
+            width=args.width,
+            height=args.height,
+        )
+        time.sleep(1)
 
 if __name__ == "__main__":
     main()
